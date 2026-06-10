@@ -31,6 +31,27 @@ flowchart TD
 
 ---
 
+## Live Demo
+
+Here is the tool running in the terminal:
+
+### 1. Document Ingestion & Local Setup
+On the first run, the script loads the PDF, splits it into semantic chunks, downloads the embedding model, and builds the local Chroma database:
+
+![Document Ingestion](assets/ingestion_demo.png)
+
+### 2. Conversational Q&A with Page Citations
+Ask any question, and the assistant responds with the answer and lists the exact page numbers and snippets used for the citation. If the answer is not in the text, it avoids hallucinating:
+
+![Q&A Session](assets/qa_demo.png)
+
+### 3. Programmatic Verification
+You can also run independent tests to inspect metadata elements (like chunk sizes, total pages, and creator tags) extracted from the PDF:
+
+![Programmatic Verification](assets/verification_demo.png)
+
+---
+
 ## Features I Implemented
 
 - **Smart Text Chunking:** Instead of splitting text blindly, I configured a `RecursiveCharacterTextSplitter` with 1000-character chunks and a 200-character overlap. This keeps key sentences intact and prevents context from being lost across chunk borders.
