@@ -1,0 +1,31 @@
+# Python virtual environment
+venv/
+env/
+.venv/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local configuration and environment variables
+.env
+.env.local
+
+# Vector databases / Local stores
+chroma_db/
+
+# Large files & Document inputs (to prevent committing copyrighted/private data)
+metadata.pdf
+*.pdf
+
+# IDE settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
