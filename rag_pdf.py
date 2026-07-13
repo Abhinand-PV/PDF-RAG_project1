@@ -101,6 +101,9 @@ def main():
         if question.lower() == "quit":
             print("Goodbye!")
             break
+        if question.lower() == "clear":
+            os.system('cls' if os.name == 'nt' else 'clear')
+            continue
         if not question:
             continue
 
