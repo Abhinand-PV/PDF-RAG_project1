@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -76,8 +77,11 @@ def ask_question_with_sources(vector_store, llm, question):
     print()
     
 def main():
-    # Ask the user which PDF to load
-    pdf_path = input("Enter the path to your PDF file: ").strip()
+    # Ask the user which PDF to load, or take from command line
+    if len(sys.argv) > 1:
+        pdf_path = sys.argv[1].strip()
+    else:
+        pdf_path = input("Enter the path to your PDF file: ").strip()
 
     if not os.path.exists(pdf_path):
         print(f"Error: File '{pdf_path}' not found.")
