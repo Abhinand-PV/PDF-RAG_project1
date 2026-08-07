@@ -107,16 +107,46 @@ You can also run independent tests to inspect metadata elements (like chunk size
 
 ## Running the Assistant
 
-To start chatting with your document, run:
+To start chatting with your document using interactive prompt mode:
 ```bash
 python rag_pdf.py
 ```
-- It will prompt you for the path to your PDF file (e.g., `metadata.pdf`).
-- The first time you run it, it will automatically download the embedding model (approx. 90MB).
-- Type in your questions. You'll get answers back with sources.
-- Type `quit` when you're done.
+
+### CLI Command Options
+
+You can also customize execution flags directly from the command line:
+
+```bash
+# Provide PDF path directly
+python rag_pdf.py -p metadata.pdf
+
+# Retrieve top 5 matching sources with custom chunk size
+python rag_pdf.py -p metadata.pdf -k 5 -c 1200 -o 250
+
+# Use a different Groq LLM model or Chroma DB folder
+python rag_pdf.py -p metadata.pdf -m llama-3.3-70b-versatile -d ./my_chroma_db
+```
+
+| Flag | Long Option | Description | Default |
+|------|-------------|-------------|---------|
+| `-p` | `--pdf` | Path to input PDF document | Interactive Prompt |
+| `-k` | `--top-k` | Number of context chunks retrieved | `3` |
+| `-c` | `--chunk-size` | Character size per split chunk | `1000` |
+| `-o` | `--chunk-overlap` | Overlap characters between chunks | `200` |
+| `-m` | `--model` | Groq LLM model identifier | `llama-3.3-70b-versatile` |
+| `-e` | `--embedding-model` | HuggingFace embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
+| `-d` | `--db-dir` | Local directory for Chroma DB storage | `./chroma_db` |
+
+### Interactive Commands
+
+During an active session, you can enter the following utility commands into the prompt:
+- `help` — View available commands
+- `info` — View document metadata, active model name, top-k retrieval setting, and chunk counts
+- `clear` — Clear the terminal screen
+- `quit` / `exit` — Exit the application
 
 ---
+
 
 ## Why did I choose these tools?
 
