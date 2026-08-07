@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 from dotenv import load_dotenv
@@ -40,7 +41,7 @@ def load_and_chunk_pdf(pdf_path, chunk_size=DEFAULT_CHUNK_SIZE, chunk_overlap=DE
         )
         chunks = text_splitter.split_documents(pages)
         print(f"Split into {len(chunks)} chunks (size: {chunk_size}, overlap: {chunk_overlap})")
-        return chunks
+        return pages, chunks
     except Exception as e:
         print(f"Error loading and chunking PDF '{pdf_path}': {e}")
         sys.exit(1)
@@ -75,7 +76,8 @@ def ask_question_with_sources(vector_store, llm, question, top_k=DEFAULT_TOP_K):
         context_parts = []
         for i, doc in enumerate(relevant_docs, 1):
             page_num = doc.metadata.get("page", "unknown")
-            context_parts.append(f"[Source {i} - Page {int(page_num) + 1 if isinstance(page_num, int) or str(page_num).isdigit() else page_num}]\n{doc.page_content}")
+            page_str = int(page_num) + 1 if isinstance(page_num, int) or str(page_num).isdigit() else page_num
+            context_parts.append(f"[Source {i} - Page {page_str}]\n{doc.page_content}")
 
         context = "\n\n".join(context_parts)
 
@@ -106,13 +108,42 @@ def ask_question_with_sources(vector_store, llm, question, top_k=DEFAULT_TOP_K):
     except Exception as e:
         print(f"Error processing question: {e}")
 
+def print_help():
+    """Print available interactive commands."""
+    print("\nAvailable Commands:")
+    print("  help        - Show this help menu")
+    print("  info        - Display current PDF and model configuration settings")
+    print("  clear       - Clear the terminal screen")
+    print("  quit / exit - Exit the interactive assistant\n")
+
+def print_info(pdf_path, total_pages, total_chunks, model_name, top_k, db_dir):
+    """Display active session metadata."""
+    print("\n--- RAG Session Info ---")
+    print(f"  PDF Document  : {pdf_path}")
+    print(f"  Total Pages   : {total_pages}")
+    print(f"  Total Chunks  : {total_chunks}")
+    print(f"  LLM Model     : {model_name}")
+    print(f"  Top-K Sources : {top_k}")
+    print(f"  Vector DB Dir : {db_dir}\n")
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Local-first PDF RAG CLI tool using ChromaDB and Groq Cloud LLMs.")
+    parser.add_argument("-p", "--pdf", type=str, help="Path to PDF file")
+    parser.add_argument("-c", "--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE, help=f"Chunk size for splitting (default: {DEFAULT_CHUNK_SIZE})")
+    parser.add_argument("-o", "--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP, help=f"Chunk overlap (default: {DEFAULT_CHUNK_OVERLAP})")
+    parser.add_argument("-k", "--top-k", type=int, default=DEFAULT_TOP_K, help=f"Top-K source chunks to retrieve (default: {DEFAULT_TOP_K})")
+    parser.add_argument("-m", "--model", type=str, default="llama-3.3-70b-versatile", help="Groq LLM model name (default: llama-3.3-70b-versatile)")
+    parser.add_argument("-e", "--embedding-model", type=str, default=DEFAULT_EMBEDDING_MODEL, help=f"Embedding model name (default: {DEFAULT_EMBEDDING_MODEL})")
+    parser.add_argument("-d", "--db-dir", type=str, default=DEFAULT_CHROMA_DB_DIR, help=f"Chroma DB persistence directory (default: {DEFAULT_CHROMA_DB_DIR})")
+    return parser.parse_args()
+
 def main():
     validate_environment()
+    args = parse_args()
 
-    # Ask the user which PDF to load, or take from command line
-    if len(sys.argv) > 1:
-        pdf_path = sys.argv[1].strip()
-    else:
+    pdf_path = args.pdf
+    if not pdf_path:
         pdf_path = input("Enter the path to your PDF file: ").strip()
 
     if not os.path.exists(pdf_path):
@@ -120,16 +151,16 @@ def main():
         return
 
     print("\n--- Loading and chunking PDF ---")
-    chunks = load_and_chunk_pdf(pdf_path)
+    pages, chunks = load_and_chunk_pdf(pdf_path, chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
 
     print("\n--- Creating vector store ---")
-    vector_store = create_vector_store(chunks)
+    vector_store = create_vector_store(chunks, db_dir=args.db_dir, embedding_model=args.embedding_model)
 
-    print("\n--- Initializing LLM (Llama 3.3 70B on Groq) ---")
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+    print(f"\n--- Initializing LLM ({args.model} on Groq) ---")
+    llm = ChatGroq(model=args.model, temperature=0.1)
 
     print("\n--- Ready! Ask questions about your PDF ---")
-    print("Type 'quit' to exit.\n")
+    print("Type 'help' for options or 'quit' to exit.\n")
 
     # Interactive Q&A loop
     while True:
@@ -141,13 +172,20 @@ def main():
             if question.lower() == "clear":
                 os.system('cls' if os.name == 'nt' else 'clear')
                 continue
+            if question.lower() == "help":
+                print_help()
+                continue
+            if question.lower() == "info":
+                print_info(pdf_path, len(pages), len(chunks), args.model, args.top_k, args.db_dir)
+                continue
             if not question:
                 continue
 
-            ask_question_with_sources(vector_store, llm, question)
+            ask_question_with_sources(vector_store, llm, question, top_k=args.top_k)
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!")
             break
 
 if __name__ == "__main__":
-    main()
+    main()
+
