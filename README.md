@@ -1,26 +1,26 @@
 # Chat with your PDFs: A Local-first RAG CLI
 
-I built this command-line tool to solve a simple problem: querying long, complex PDF documents locally, quickly, and securely without uploading them to third-party web apps or paying for OpenAI API credits. 
+A production-grade command-line application built to query long, complex PDF documents locally, quickly, and securely without uploading sensitive files to third-party services or relying on paid OpenAI API endpoints.
 
-This project uses **LangChain** to coordinate the workflow, **ChromaDB** to store text embeddings locally, and **Groq Cloud** (running Llama 3.3 70B) for incredibly fast Q&A generation.
+This architecture leverages **LangChain** for orchestration, **ChromaDB** for persistent local vector database storage, **HuggingFace Sentence-Transformers** for CPU-friendly zero-cost embeddings, and **Groq Cloud** (Llama 3.3 70B) for ultra-fast, grounded Q&A generation.
 
 ---
 
 ## Behind the Scenes (How it Works)
 
-Here is a quick look at what happens under the hood when you feed the script a PDF:
+The overall data flow for ingestion and query processing is illustrated below:
 
 ```mermaid
 flowchart TD
     subgraph Ingestion ["1. Processing the PDF (Offline)"]
-        A[Your PDF Document] --> B[Extract text page-by-page]
+        A[PDF Document] --> B[Extract text page-by-page]
         B --> C[Split into overlapping 1000-char chunks]
         C --> D[Embed chunks locally using sentence-transformers]
         D --> E[(Store in local ChromaDB folder)]
     end
 
     subgraph Query ["2. Asking a Question (Online)"]
-        F[Your Question] --> G[Convert question to vector]
+        F[User Question] --> G[Convert question to vector]
         G --> H[Retrieve top 3 matching chunks from ChromaDB]
         H --> I[Package matching text + page numbers]
         I --> J[Send prompt to Groq API]
@@ -31,143 +31,304 @@ flowchart TD
 
 ---
 
-## Live Demo
+## Technical Highlights
 
-Here is the tool running in the terminal:
-
-### 1. Document Ingestion & Local Setup
-On the first run, the script loads the PDF, splits it into semantic chunks, downloads the embedding model, and builds the local Chroma database:
-
-![Document Ingestion](pics/ingestion_demo.png)
-
-### 2. Conversational Q&A with Page Citations
-Ask any question, and the assistant responds with the answer and lists the exact page numbers and snippets used for the citation. If the answer is not in the text, it avoids hallucinating:
-
-![Q&A Session](pics/qa_demo.png)
-
-### 3. Programmatic Verification
-You can also run independent tests to inspect metadata elements (like chunk sizes, total pages, and creator tags) extracted from the PDF:
-
-![Programmatic Verification](pics/verification_demo.png)
+- **Smart Text Chunking:** `RecursiveCharacterTextSplitter` configured with 1,000-character chunk sizes and 200-character overlaps to maintain semantic continuity across boundaries.
+- **Zero-Cost Local Embeddings:** Uses `sentence-transformers/all-MiniLM-L6-v2` (~90MB model size) to generate dense vector representations on CPU, eliminating external embedding API fees.
+- **Persistent Storage:** `ChromaDB` stores embeddings locally in `./chroma_db`, avoiding redundant document ingestion on subsequent runs.
+- **Ultra-Fast LLM Inference:** Integrates `llama-3.3-70b-versatile` via Groq Cloud hardware acceleration for low-latency terminal interactions.
+- **Grounded Responses & Source Citations:** Strict system prompt constraints prevent model hallucinations and enforce precise page-number citations for verification.
 
 ---
 
-## Features I Implemented
+## Step-by-Step Implementation Guide
 
-- **Smart Text Chunking:** Instead of splitting text blindly, I configured a `RecursiveCharacterTextSplitter` with 1000-character chunks and a 200-character overlap. This keeps key sentences intact and prevents context from being lost across chunk borders.
-- **Zero-Cost Embeddings:** I used `sentence-transformers/all-MiniLM-L6-v2` to generate vector embeddings on your local machine. This download is small (~90MB), runs entirely on CPU, and means you don't need to pay for embedding API keys.
-- **Persistent Local Database:** ChromaDB stores the vectors directly in a `./chroma_db` folder. This means once you ingest a PDF, you don't have to wait to chunk and embed it again on your next run.
-- **Lightning-Fast Q&A:** I integrated **Groq's API** using `llama-3.3-70b-versatile` to handle reasoning. Groq's hardware yields blazing-fast response speeds.
-- **No-Hallucination Citations:** The prompt template tells the LLM to ground its answers strictly in the retrieved text. If the answer isn't in the PDF, it says so. It also prints exactly which page numbers and snippets it used, making the answers fully auditable.
+This guide walks through building this PDF Retrieval-Augmented Generation (RAG) system from scratch.
+
+### Step 1: Project Setup and Dependencies
+
+Create a project directory structure:
+
+```text
+PDF-RAG/
+├── .env
+├── .env.example
+├── README.md
+├── rag_pdf.py
+└── requirements.txt
+```
+
+Define the dependencies in `requirements.txt`:
+
+```text
+langchain==1.3.4
+langchain-community==0.3.30
+langchain-core==1.4.2
+langchain-groq==1.1.2
+langchain-huggingface==1.2.2
+sentence-transformers==5.5.1
+chromadb==1.5.9
+pypdf==6.13.1
+python-dotenv==1.2.2
+```
+
+Initialize your virtual environment and install dependencies:
+
+```bash
+# Windows
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Configure your environment variable template in `.env`:
+
+```env
+GROQ_API_KEY=gsk_your_actual_api_key_here
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+CHROMA_DB_DIR=./chroma_db
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+TOP_K=3
+```
 
 ---
 
-## How to Set it Up and Run It
+### Step 2: Document Ingestion and Semantic Splitting
 
-### What you need
-- Python 3.9 or higher installed on your system.
-- A free Groq API Key. You can grab one in about 30 seconds at [console.groq.com](https://console.groq.com/).
+Load the document page by page using `PyPDFLoader` and split it into manageable semantic chunks using `RecursiveCharacterTextSplitter`.
 
-### Installation & Setup
+```python
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-1. **Clone the project repository:**
+def load_and_chunk_pdf(pdf_path, chunk_size=1000, chunk_overlap=200):
+    # Load pages with page-level metadata
+    loader = PyPDFLoader(pdf_path)
+    pages = loader.load()
+    
+    # Split text into overlapping segments
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
+    )
+    chunks = text_splitter.split_documents(pages)
+    return pages, chunks
+```
+
+---
+
+### Step 3: Vector Embeddings and Local Persistence
+
+Convert text chunks into vector representations using a HuggingFace transformer model and index them in a local Chroma vector database.
+
+```python
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+
+def create_vector_store(chunks, db_dir="./chroma_db", model_name="sentence-transformers/all-MiniLM-L6-v2"):
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
+    vector_store = Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=db_dir
+    )
+    return vector_store
+```
+
+---
+
+### Step 4: Groq LLM & Grounded Prompt Engineering
+
+Configure `ChatGroq` with a strict prompt template that forces the model to rely exclusively on the retrieved context and cite source pages.
+
+```python
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
+
+def build_rag_chain(model_name="llama-3.3-70b-versatile"):
+    llm = ChatGroq(model=model_name, temperature=0.1)
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", (
+            "You are a helpful assistant that answers questions based on the "
+            "provided context. Each piece of context is labeled with its source "
+            "number and page. In your answer, cite which sources you used "
+            "(e.g., [Source 1], [Source 2]). If the answer is not in the context, "
+            "say 'I don't have enough information to answer that based on the "
+            "document.' Keep answers concise.\n\n"
+            "Context:\n{context}"
+        )),
+        ("human", "{question}"),
+    ])
+    
+    return prompt | llm
+```
+
+---
+
+### Step 5: Query Execution and Citation Formatting
+
+Perform similarity retrieval, build the source-labeled context string, execute the LLM chain, and render source citations with page numbers.
+
+```python
+def ask_question(vector_store, chain, question, top_k=3):
+    retriever = vector_store.as_retriever(search_kwargs={"k": top_k})
+    relevant_docs = retriever.invoke(question)
+    
+    if not relevant_docs:
+        print("No relevant context found in the document.")
+        return
+
+    # Build labeled context
+    context_parts = []
+    for i, doc in enumerate(relevant_docs, 1):
+        page_num = doc.metadata.get("page", 0)
+        page_display = page_num + 1 if isinstance(page_num, int) else page_num
+        context_parts.append(f"[Source {i} - Page {page_display}]\n{doc.page_content}")
+
+    context_str = "\n\n".join(context_parts)
+    response = chain.invoke({"context": context_str, "question": question})
+
+    print(f"\nAnswer: {response.content}\n")
+    print("--- Sources ---")
+    for i, doc in enumerate(relevant_docs, 1):
+        page_num = doc.metadata.get("page", 0)
+        page_display = page_num + 1 if isinstance(page_num, int) else page_num
+        snippet = doc.page_content[:150].replace("\n", " ")
+        print(f"  [Source {i}] Page {page_display}: \"{snippet}...\"")
+```
+
+---
+
+### Step 6: Interactive CLI and Shell Commands
+
+Wrap the components in an interactive command-line interface using `argparse` and a REPL loop supporting internal utility commands (`info`, `help`, `clear`, `quit`).
+
+```python
+import argparse
+import sys
+import os
+from dotenv import load_dotenv
+
+def main():
+    load_dotenv()
+    if not os.getenv("GROQ_API_KEY"):
+        print("Error: GROQ_API_KEY environment variable is missing.")
+        sys.exit(1)
+
+    parser = argparse.ArgumentParser(description="Local PDF RAG CLI")
+    parser.add_argument("-p", "--pdf", type=str, help="Path to PDF file")
+    parser.add_argument("-k", "--top-k", type=int, default=3, help="Top K sources")
+    args = parser.parse_args()
+
+    pdf_path = args.pdf or input("Enter PDF path: ").strip()
+    pages, chunks = load_and_chunk_pdf(pdf_path)
+    vector_store = create_vector_store(chunks)
+    chain = build_rag_chain()
+
+    while True:
+        try:
+            query = input("\nYour question: ").strip()
+            if query.lower() in ("quit", "exit"):
+                break
+            if query.lower() == "clear":
+                os.system("cls" if os.name == "nt" else "clear")
+                continue
+            if query:
+                ask_question(vector_store, chain, query, top_k=args.top_k)
+        except (KeyboardInterrupt, EOFError):
+            break
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Installation & User Setup
+
+### Prerequisites
+
+- Python 3.9 or higher installed.
+- A free Groq API key from [console.groq.com](https://console.groq.com/).
+
+### Installation
+
+1. **Clone the repository:**
    ```bash
    git clone https://github.com/your-username/PDF-RAG.git
    cd PDF-RAG
    ```
 
-2. **Set up a clean virtual environment:**
-   - **Windows:**
-     ```bash
-     python -m venv venv
-     venv\Scripts\activate
-     ```
-   - **macOS/Linux:**
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
+2. **Create and activate virtual environment:**
+   ```bash
+   python -m venv venv
+   # Windows:
+   venv\Scripts\activate
+   # macOS/Linux:
+   source venv/bin/activate
+   ```
 
-3. **Install the dependencies:**
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Add your API key:**
-   Duplicate the `.env.example` file and rename it to `.env`:
+4. **Configure environment variables:**
    ```bash
    cp .env.example .env
    ```
-   Open the `.env` file and paste your Groq API key:
+   Set your API key in `.env`:
    ```env
    GROQ_API_KEY=gsk_your_actual_key_here
    ```
 
 ---
 
-## Running the Assistant
+## Running the Application
 
-To start chatting with your document using interactive prompt mode:
+Start the interactive terminal session:
+
 ```bash
 python rag_pdf.py
 ```
 
-### CLI Command Options
+### CLI Arguments
 
-You can also customize execution flags directly from the command line:
+Customize parameters via flags:
 
 ```bash
-# Provide PDF path directly
-python rag_pdf.py -p metadata.pdf
-
-# Retrieve top 5 matching sources with custom chunk size
 python rag_pdf.py -p metadata.pdf -k 5 -c 1200 -o 250
-
-# Use a different Groq LLM model or Chroma DB folder
-python rag_pdf.py -p metadata.pdf -m llama-3.3-70b-versatile -d ./my_chroma_db
 ```
 
-| Flag | Long Option | Description | Default |
-|------|-------------|-------------|---------|
-| `-p` | `--pdf` | Path to input PDF document | Interactive Prompt |
-| `-k` | `--top-k` | Number of context chunks retrieved | `3` |
-| `-c` | `--chunk-size` | Character size per split chunk | `1000` |
+| Flag | Option | Description | Default |
+|---|---|---|---|
+| `-p` | `--pdf` | Path to target PDF file | Prompt user |
+| `-k` | `--top-k` | Number of context chunks to retrieve | `3` |
+| `-c` | `--chunk-size` | Character size per chunk | `1000` |
 | `-o` | `--chunk-overlap` | Overlap characters between chunks | `200` |
 | `-m` | `--model` | Groq LLM model identifier | `llama-3.3-70b-versatile` |
 | `-e` | `--embedding-model` | HuggingFace embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
-| `-d` | `--db-dir` | Local directory for Chroma DB storage | `./chroma_db` |
+| `-d` | `--db-dir` | Local vector database directory | `./chroma_db` |
 
 ### Interactive Commands
 
-During an active session, you can enter the following utility commands into the prompt:
-- `help` — View available commands
-- `info` — View document metadata, active model name, top-k retrieval setting, and chunk counts
-- `clear` — Clear the terminal screen
-- `quit` / `exit` — Exit the application
+- `help` — Show command options.
+- `info` — Display active document details, chunk count, and model configuration.
+- `clear` — Clear terminal screen.
+- `quit` / `exit` — Terminate session.
 
 ---
 
+## Technical Rationale
 
-## Why did I choose these tools?
+- **Framework Choice (LangChain):** Decouples document loading, vector database integration, and LLM inference providers, making future infrastructure swaps seamless.
+- **Local Storage (ChromaDB):** Operates locally without requiring server deployment or cloud vector storage setup.
+- **Groq Inference Acceleration:** Provides low latency inference on Llama 3.3 70B, making command-line interaction fluid and instant.
 
-- **Why LangChain?** I wanted a framework that would allow me to swap components easily. If I want to switch from ChromaDB to Pinecone or from Groq to a local Ollama model in the future, it's just a few lines of code.
-- **Why ChromaDB?** It runs entirely in-memory or locally, making it perfect for lightweight, serverless tools. There was no need to manage docker containers or spin up cloud databases.
-- **Why Groq & Llama 3.3?** Standard cloud inference can feel sluggish. Groq is almost instantaneous, making terminal-based chat interfaces feel like a conversation rather than a compilation step. Additionally, I took advantage of Groq's generous free tier to get state-of-the-art model inference without incurring any costs.
-
----
-
-## How the Project Works
-
-In summary, this RAG application operates through a two-phase pipeline:
-
-1. **Document Ingestion & Indexing:** 
-   - The user provides a path to a PDF document.
-   - The system extracts the raw text page-by-page and segments it into overlapping chunks to preserve contextual boundaries.
-   - These chunks are converted into dense vector representations locally using a lightweight HuggingFace transformer model.
-   - The vectors and their corresponding text segments are indexed and stored in a local, persistent vector database (ChromaDB).
-
-2. **Retrieval & Answer Synthesis:**
-   - When a user submits a query, it is converted into a vector representation using the same embedding model.
-   - The vector database performs a semantic similarity search to retrieve the most relevant text chunks.
-   - These chunks, alongside their page numbers, are compiled into a structured prompt context.
-   - The context and user query are sent to the Groq API, where a Llama 3.3 model generates a precise, cited answer grounded strictly in the provided document text.
