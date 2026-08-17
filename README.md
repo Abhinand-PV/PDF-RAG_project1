@@ -38,6 +38,7 @@ flowchart TD
 - **Persistent Storage:** `ChromaDB` stores embeddings locally in `./chroma_db`, avoiding redundant document ingestion on subsequent runs.
 - **Ultra-Fast LLM Inference:** Integrates `llama-3.3-70b-versatile` via Groq Cloud hardware acceleration for low-latency terminal interactions.
 - **Grounded Responses & Source Citations:** Strict system prompt constraints prevent model hallucinations and enforce precise page-number citations for verification.
+- **Query Response Latency Tracking:** Measures real-time context retrieval and LLM response generation timings for performance monitoring.
 
 ---
 
