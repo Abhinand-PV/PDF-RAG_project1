@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import time
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -66,6 +67,7 @@ def create_vector_store(chunks, db_dir=DEFAULT_CHROMA_DB_DIR, embedding_model=DE
 def ask_question_with_sources(vector_store, llm, question, top_k=DEFAULT_TOP_K):
     """Retrieve relevant chunks and generate an answer with citations."""
     try:
+        start_time = time.perf_counter()
         retriever = vector_store.as_retriever(search_kwargs={"k": top_k})
         relevant_docs = retriever.invoke(question)
 
@@ -96,6 +98,7 @@ def ask_question_with_sources(vector_store, llm, question, top_k=DEFAULT_TOP_K):
 
         chain = prompt | llm
         response = chain.invoke({"context": context, "question": question})
+        elapsed_time = time.perf_counter() - start_time
 
         print(f"\nAnswer: {response.content}")
         print("\n--- Sources ---")
@@ -104,6 +107,7 @@ def ask_question_with_sources(vector_store, llm, question, top_k=DEFAULT_TOP_K):
             page_display = int(page_num) + 1 if isinstance(page_num, int) or str(page_num).isdigit() else page_num
             snippet = doc.page_content[:150].replace("\n", " ")
             print(f"  [Source {i}] Page {page_display}: \"{snippet}...\"")
+        print(f"  (Query processed in {elapsed_time:.2f}s)")
         print()
     except Exception as e:
         print(f"Error processing question: {e}")
